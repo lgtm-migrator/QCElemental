@@ -4,15 +4,15 @@ Molecule Object Model
 
 import hashlib
 import json
+import pdb
 import warnings
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 import numpy as np
-from pydantic import ConstrainedFloat, ConstrainedInt, Field, constr, validator
+from pydantic import ConstrainedFloat, ConstrainedInt, Field, validator
+from typing_extensions import Literal
 
-# molparse imports separated b/c https://github.com/python/mypy/issues/7203
 from ..molparse.from_arrays import from_arrays
 from ..molparse.from_schema import from_schema
 from ..molparse.from_string import from_string
@@ -22,9 +22,11 @@ from ..periodic_table import periodictable
 from ..physical_constants import constants
 from ..testing import compare, compare_values
 from ..util import deserialize, measure_coordinates, msgpackext_loads, provenance_stamp, which_import
-from .basemodels import ProtoModel, qcschema_draft
-from .common_models import Provenance, qcschema_molecule_default
+
+# molparse imports separated b/c https://github.com/python/mypy/issues/7203
+from .basemodels import ProtoModel, Provenance, qcschema_draft
 from .types import Array
+from .qcschema_abc import AutoSetProvenance
 
 if TYPE_CHECKING:
     from pydantic.typing import ReprArgs
@@ -94,7 +96,7 @@ class Identifiers(ProtoModel):
         serialize_skip_defaults = True
 
 
-class Molecule(ProtoModel):
+class Molecule(AutoSetProvenance):
     r"""
     The physical Cartesian representation of the molecular system.
 
@@ -112,17 +114,8 @@ class Molecule(ProtoModel):
       * <varies>: irregular dimension not systematically reshapable
 
     """
+    schema_name: Literal["qcschema_molecule"] = "qcschema_molecule"
 
-    schema_name: constr(strip_whitespace=True, regex="^(qcschema_molecule)$") = Field(  # type: ignore
-        qcschema_molecule_default,
-        description=(
-            f"The QCSchema specification to which this model conforms. Explicitly fixed as {qcschema_molecule_default}."
-        ),
-    )
-    schema_version: int = Field(  # type: ignore
-        2,
-        description="The version number of :attr:`~qcelemental.models.Molecule.schema_name` to which this model conforms.",
-    )
     validated: bool = Field(  # type: ignore
         False,
         description="A boolean indicator (for speed purposes) that the input Molecule data has been previously checked "
@@ -277,22 +270,6 @@ class Molecule(ProtoModel):
         None,
         description="Maximal point group symmetry which :attr:`~qcelemental.models.Molecule.geometry` should be treated. Lowercase.",
     )
-    # Extra
-    provenance: Provenance = Field(
-        default_factory=partial(provenance_stamp, __name__),
-        description="The provenance information about how this Molecule (and its attributes) were generated, "
-        "provided, and manipulated.",
-    )
-    id: Optional[Any] = Field(  # type: ignore
-        None,
-        description="A unique identifier for this Molecule object. This field exists primarily for Databases "
-        "(e.g. Fractal's Server) to track and lookup this specific object and should virtually "
-        "never need to be manually set.",
-    )
-    extras: Dict[str, Any] = Field(  # type: ignore
-        None,
-        description="Additional information to bundle with the molecule. Use for schema development and scratch space.",
-    )
 
     class Config(ProtoModel.Config):
         serialize_skip_defaults = True
@@ -336,8 +313,8 @@ class Molecule(ProtoModel):
         geometry_noise = kwargs.pop("geometry_noise", GEOMETRY_NOISE)
 
         if validate:
-            kwargs["schema_name"] = kwargs.pop("schema_name", "qcschema_molecule")
             kwargs["schema_version"] = kwargs.pop("schema_version", 2)
+            kwargs["schema_name"] = kwargs.pop("schema_name", "qcschema_molecule")
             # original_keys = set(kwargs.keys())  # revive when ready to revisit sparsity
 
             nonphysical = kwargs.pop("nonphysical", False)
@@ -910,7 +887,6 @@ class Molecule(ProtoModel):
             for key in charge_spin_opts - kwarg_keys:
                 input_dict.pop(key, None)
             input_dict.pop("validated", None)
-
         return cls(orient=orient, validate=validate, **input_dict)
 
     @classmethod
